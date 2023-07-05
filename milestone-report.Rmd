@@ -1,0 +1,539 @@
+---
+title: 'Coursera Data Science Specialization Capstone Project: Milestone Report'
+author: "Anne Strader"
+date: "2023-06-18"
+output: html_document
+---
+
+## Introduction and Project Objectives
+
+The overarching goal of the Data Science Specialization capstone project is to develop a predictive text model based on text data provided by SwiftKey. This model will be presented in the form of a Shiny app, which suggests the next word to the user after receiving some text as input. 
+
+In this milestone report, the results of the exploratory analysis are presented, as well as an outline of how the predictive model development will proceed:
+
+1. The data are downloaded, extracted and cleaned.
+2. The data are sampled, to reduce necessary memory and computation time.
+3. The data are then combined into a single corpus using the "quanteda" R library. The corpus is processed to yield more informative results in the predictive model (for example, setting all words to lowercase so that capitalization doesn't result in the same word being classified as multiple words), and preferable results (for example, removing profanity from the dataset). 
+4. The corpus is then divided ("tokenized") into single words (unigrams), pairs of words (bigrams) and groups of three words (trigrams). The frequencies of the most common unigrams, bigrams and trigrams are visualized.
+5. A brief description of how the model development will proceed is included.
+
+## Task 1: Getting and Cleaning the Data
+
+In this step, the goals are to: 
+
+1. Become familiar with the databases. In this project, only the English-language database will be considered.
+2. Load the English-language data.
+3. Identify some general characteristics about the datasets and do some basic data exploration. 
+4. Tokenization: identifying appropriate tokens such as word, numbers and punctuation. 
+5. Profanity filtering: removing profanity so that these words will not be predicted.
+
+```{r load_libraries, warning = FALSE, message = FALSE, eval = TRUE}
+library(stringi)
+library(kableExtra)
+library(SnowballC)
+library(ggplot2)
+library(wordcloud)
+library(RColorBrewer)
+library(Matrix)
+library(quanteda)
+library(hunspell)
+library(dplyr)
+library(hunspell)
+```
+
+```{r set_knitr_options}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Loading the Data
+
+```{r dl_time_lim, warning = FALSE, message = FALSE}
+options(timeout=500)
+```
+
+First, the full dataset is downloaded from [here](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip).
+
+``` {r download_data, eval = TRUE}
+# define working directory
+wd <- "D:/Desktop/online-courses/Coursera/Data Science Specialization/Course 10 Data Science Capstone/course-project"
+
+# define URL where Capstone dataset will be downloaded
+url <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+
+# define name and destination of downloaded file 
+data.path <- paste(wd, "/SwiftKey-Data.zip", sep = "")
+
+# if the file containing the SwiftKey data does not yet exist, download the dataset
+if (!file.exists(data.path)){
+        download.file(url, data.path, mode = "wb")
+}
+```
+
+Then, the downloaded dataset is unzipped:
+
+``` {r unzip_file, eval = TRUE}
+# define path to unzipped file 
+data.files.path <- paste(wd, "/final", sep = "")
+
+# unzip file if necessary
+if(!file.exists(data.files.path)){
+        unzip(zipfile = data.files.path)
+}     
+```
+
+### Basic Summary
+
+Let's look at what data are contained in the dataset:
+
+``` {r, look_dirs, eval = TRUE}
+# list the subdirectories contained in the unzipped dataset
+list.files(data.files.path)
+```
+
+We have data available for four languages: German, English, Finnish and Russian. In this project, we are only using **English-language** data. Let's look at the files contained within the English-language dataset:
+
+```{r, look_dirs_EN, eval = TRUE}
+# define path to English-language data
+data.files.path.EN <- paste(data.files.path, "/en_US", sep = "")
+```
+
+```{r list_dirs, eval = TRUE}
+# list the subdirectories contained in the English-language component of the dataset
+list.files(data.files.path.EN)
+```
+
+We have English-language data from three different sources:
+
+1. blogs (en_US.blogs.txt)
+2. news (en_US.news.txt)
+3. Twitter (en_US.twitter.txt)
+
+Next, the data are read into R: 
+
+```{r, read_full_datasets, cache = FALSE, warning = FALSE, eval = TRUE}
+# assign a variable name to each English dataset:
+blog.file <- paste(data.files.path.EN, "/en_US.blogs.txt", sep = "")  # blogs
+news.file <- paste(data.files.path.EN, "/en_US.news.txt", sep = "")  # news
+twitter.file <- paste(data.files.path.EN, "/en_US.twitter.txt", sep = "")  # Twitter
+
+# read in blog data
+blog.file.con <- file(blog.file, open = "r")
+blog.text <- readLines(blog.file.con, encoding = "UTF-8", skipNul = TRUE)
+close(blog.file.con)
+
+# read in news data
+news.file.con <- file(news.file, open = "r")
+news.text <- readLines(news.file.con, encoding = "UTF-8", skipNul = TRUE)
+close(news.file.con)
+
+# read in Twitter data
+twitter.file.con <- file(twitter.file, open = "r")
+twitter.text <- readLines(twitter.file.con, encoding = "UTF-8", skipNul = TRUE)
+close(twitter.file.con)
+```
+
+The file sizes (in MB) are then checked:
+
+```{r, check_file_sizes, cache = FALSE, eval = TRUE}
+# compute file sizes for each text file
+size.blog.file <- file.info(blog.file)$size / 1024 ^ 2  # blog text file size
+size.news.file <- file.info(news.file)$size / 1024 ^ 2  # news text file size
+size.twitter.file <- file.info(twitter.file)$size / 1024 ^ 2  # Twitter text file size 
+```
+
+These files are quite large, which suggests that in later exploratory data analysis, the data should be randomly sampled in order to improve computation times.
+
+Next, the numbers of lines, words and characters in each file are counted:
+
+```{r count_lines, cache = FALSE, eval = TRUE}
+# count number of lines in each file
+num.lines.file <- sapply(list(blog.text, news.text, twitter.text), length)
+```
+
+The number of words in each file are counted next:
+
+```{r count_words_file, cache = FALSE, eval = TRUE}
+# count the number of words in each file
+num.words.file <- sapply(list(blog.text, news.text, twitter.text), stri_stats_latex)[4,]
+```
+
+Finally, the number of characters in each file are counted:
+
+```{r count_chars_file, cache = FALSE, eval = TRUE}
+# count number of characters in each file
+num.chars.file <- sapply(list(nchar(blog.text), nchar(news.text), nchar(twitter.text)), sum)
+```
+
+Let's summarize this information in a table:
+
+```{r file_stats, cache = FALSE, eval = TRUE}
+# define rows in table
+files.summary <- data.frame(
+    filename = c(sub(".*/", "", blog.file), sub(".*/", "", news.file), sub(".*/", "", twitter.file)),
+    size = paste(sprintf("%0.2f", c(size.blog.file, size.news.file, size.twitter.file)), "MB"),
+    lines = num.lines.file,
+    words = num.words.file,
+    characters = num.chars.file
+)
+```
+
+```{r print_file_summary, cache = FALSE, eval = TRUE}
+# print dataframe
+head(files.summary)
+```
+
+### Sampling and Combining the Data
+As we saw in the summary table, each of the three file sizes are quite large. Using all of the data would substantially increase computation times; therefore, 5,000 lines are selected from each file to be cleaned and combined into a unified dataset:
+
+```{r sample_data, cache = FALSE, eval = TRUE}
+# set the seed to ensure reproducible results
+set.seed(59284)
+
+# set sample size
+sample.size <- 5000
+
+# sample data from each text file 
+sample.blog <- sample(blog.text, sample.size, replace = FALSE)
+sample.news <- sample(news.text, sample.size, replace = FALSE)
+sample.twitter <- sample(twitter.text, sample.size, replace = FALSE)
+```
+
+The three samples are then combined into one data file:
+
+```{r combine_samples, cache = FALSE, eval = TRUE}
+# combine the data
+combined.sample <- c(sample.blog, sample.news, sample.twitter)
+
+# define filename for sample data
+combined.sample.filename <- "sample_data_EN.txt"
+
+# write combined sample data to file 
+combined.sample.con <- file(combined.sample.filename, open = "w")
+writeLines(combined.sample, combined.sample.con)
+close(combined.sample.con)
+```
+
+The dataset is then unified into a corpus, using the r package "quanteda". This package was chosen due to its efficiency in processing large amounts of text data relative to other R packages. 
+
+```{r build_corpus, cache = FALSE, eval = TRUE}
+text.EN.corpus <- corpus(combined.sample)
+```
+
+Before proceeding to the next step, variables that are no longer necessary are removed:
+
+### Cleaning the Data (Initial Steps)
+
+The text data are cleaned to remove inconsistencies that would be mostly irrelevant to general text prediction (such as lowercase vs. uppercase words, punctuations, Twitter handles and URLs), or would generate undesired results (such as profanity).
+
+First, the following steps are performed:
+
+1. Website URLs, Twitter handles and email addresses are removed.
+2. Non-ASCII characters are removed.
+3. Numbers are removed.
+4. Punctuation is removed.
+5. Extra white space is removed.
+
+```{r clean_tokenize_data, cache = FALSE, eval = TRUE}
+text.tokens <- tokens(text.EN.corpus,
+                      what="word1",
+                      remove_numbers = TRUE,
+                      remove_punct = TRUE,
+                      remove_url =TRUE,
+                      remove_separators = TRUE,
+                      remove_symbols = TRUE,
+                      verbose = quanteda_options("verbose"))
+```
+
+A version of the tokens without stopwords is generated, for initial exploratory analysis. In the predictive model, stopwords will be left in the data, in order to produce more natural-sounding results. (For the same reason, stemming is not applied either during the exploratory analysis or predictive model building.)
+
+```{r remove_stopwords, cache = FALSE, eval = TRUE}
+tokens.no.stopwords <- tokens_remove(text.tokens, pattern = stopwords("en"))
+```
+
+In order to remove profanity from the text sample, a list of swear words is read and stored. This will be used to remove profanity whenever document-feature matrices are created:
+
+```{r read_in_profanity, cache = FALSE, eval = TRUE}
+# define name and destination of downloaded file
+data.path <- paste(wd, "/bad-words.txt", sep = "")
+
+# define URL where text file containing a list of profane words/phrases can be downloaded
+url <- "http://www.cs.cmu.edu/~biglou/resources/bad-words.txt"
+
+# if necessary, download the text file
+if (!file.exists(data.path)){
+        download.file(url, data.path, mode = "wb")
+}
+
+# read the lines of the text file containing profanities
+bad.words.con <- file(data.path, open = "r")
+bad.words <- readLines(bad.words.con, encoding = "UTF-8", skipNul = TRUE)
+close(bad.words.con)
+```
+
+## Task 2: Exploratory Data Analysis and Further Data Cleaning
+
+In this step, the goal is to better understand the distribution and relationship between words, tokens, and phrases in the dataset. 
+
+The following questions will be considered:
+
+1. Some words are more frequent than others - what are the distributions of word frequencies? 
+2. What are the frequencies of 2-grams and 3-grams in the dataset? 
+3. How many unique words do you need in a frequency sorted dictionary to cover 50% of all word instances in the language? 90%? 
+4. How do you evaluate how many of the words come from foreign languages? 
+5. Can you think of a way to increase the coverage -- identifying words that may not be in the corpora or using a smaller number of words in the dictionary to cover the same number of phrases?
+
+### Unigrams
+
+First, two sets of unigrams are generated: one with stopwords, and one without:
+
+```{r unigrams, cache = FALSE, eval = TRUE}
+# generate unigrams without stopwords
+unigram.no.stopwords <- tokens_ngrams(tokens.no.stopwords, n = 1, concatenator = " ")
+
+# generate unigrams with stopwords
+unigram.with.stopwords <- tokens_ngrams(text.tokens, n = 1, concatenator = " ")
+```
+
+Next, a document-feature matrix is created for the unigram (single word) case, without stopwords. During this process, all words are converted to lowercase and profanity and padding (extra white space) are removed:
+
+```{r unigram_dfm, cache = FALSE, eval = TRUE, warning = FALSE}
+# create the document-feature matrix
+text.unigram <- dfm(unigram.no.stopwords, 
+                    tolower = TRUE,
+                    remove_padding = TRUE,
+                    remove = bad.words,
+                    verbose = FALSE)
+```
+
+The 100 most frequent unigrams in the corpus are identified:
+
+```{r unigram_top_features_no_stopwords, cache = FALSE, eval = TRUE}
+# define most frequently-occurring unigrams
+unigram.top.features.no.stopwords <- topfeatures(text.unigram, 100)
+
+# create dataframe displaying most frequent unigrams
+unigram.top.features.no.stopwords.df <- data.frame(unigram = names(unigram.top.features.no.stopwords), freq = unigram.top.features.no.stopwords)
+
+# display the most frequent unigrams
+head(unigram.top.features.no.stopwords.df)
+```
+
+The frequencies of the most common words (unigrams) are visualized here as a word cloud:
+
+```{r wordcloud_unigram, eval = TRUE, warning = FALSE}
+wordcloud(words = unigram.top.features.no.stopwords.df$unigram,
+              freq = unigram.top.features.no.stopwords.df$freq,
+              min.freq = 1,
+              max.words = 100,
+              random.order = FALSE,
+              rot.per = 0.35,
+              colors=brewer.pal(9, "Set1"))
+```
+
+The frequencies of the 15 most common words are shown using a histogram:
+
+```{r hist_unigram, eval = TRUE, warning = FALSE}
+# build histogram
+unigram_hist <- ggplot(unigram.top.features.no.stopwords.df[1:15,], aes(reorder(unigram.top.features.no.stopwords.df[1:15,]$unigram, -unigram.top.features.no.stopwords.df[1:15,]$freq), y = unigram.top.features.no.stopwords.df[1:15,]$freq))
+unigram_hist <- unigram_hist + geom_bar(stat = "Identity", fill = "aquamarine3")
+unigram_hist <- unigram_hist + xlab("unigram") + ylab("frequency") + ggtitle("15 Most Frequent Unigrams")
+unigram_hist <- unigram_hist + theme(plot.title = element_text(size = 14, hjust = 0.5, vjust = 0.5),
+               axis.text.x = element_text(hjust = 0.5, vjust = 0.5, angle = 45),
+               axis.text.y = element_text(hjust = 0.5, vjust = 0.5))
+
+# display histogram
+print(unigram_hist)
+```
+
+### Word Frequency and English Language Content
+
+The high frequencies of the most common words suggest that a small fraction of the set of unique words comprises most of the corpus. Let's consider how many unique words would be necessary to cover 50% and 90% of all word instances in the language (represented by the corpus). Note that stopwords are not included in this analysis, and that the total number of words necessary to reach the aforementioned thresholds would decrease considerably when including them:
+
+```{r unique_word_freq, eval = TRUE}
+# create another dataframe with a maximum number of features to capture all unique words in dataset
+unigram.freqs.no.stopwords <- topfeatures(text.unigram, 100000)
+unigram.freqs.no.stopwords.df <- data.frame(unigram = names(unigram.freqs.no.stopwords), freq = unigram.freqs.no.stopwords)
+
+# calculate cumulative percentage of dataset to which each word contributes
+unigram.freqs.no.stopwords.df["cumul_perc"] <- cumsum(unigram.freqs.no.stopwords.df$freq / sum(unigram.freqs.no.stopwords.df$freq)) * 100.0
+
+# determine number of words necessary to cover 50% of the language
+num.words.fifty.perc <- nrow(filter(unigram.freqs.no.stopwords.df, cumul_perc < 50.0)) + 1
+print(paste("Number of words necessary to cover 50% of the language = ", num.words.fifty.perc, sep = ""))
+
+# determine number of words necessary to cover 90% of the language
+num.words.ninety.perc <- nrow(filter(unigram.freqs.no.stopwords.df, cumul_perc < 90.0)) + 1
+print(paste("Number of words necessary to cover 90% of the language = ", num.words.ninety.perc, sep = ""))
+```
+
+The next step is to evaluate how many of the words in the Corpus are English-language. This is estimated by:
+
+1. counting the total number of words in the corpus 
+2. applying an English-language spellchecker (hunspell_check) and removing all words not in the corresponding dictionary 
+3. counting the remaining number of words in the corpus 
+
+```{r spellchecker}
+# count and print total number of words in the corpus 
+total.words <- nrow(unigram.freqs.no.stopwords.df)
+print(paste("The total number of words in the corpus (before applying the spellchecker) = ", total.words, sep = ""))
+
+# apply the spellchecker and print the total number of remaining words in the corpus
+total.words.spellcheck <- sum(hunspell_check(unlist(unigram.freqs.no.stopwords.df["unigram"])))
+print(paste("The total number of English-language words in the corpus (after applying the spellchecker) = ", total.words.spellcheck, sep = ""))
+```
+
+Because misspelled words may be more often attributed to names or terms not in a standard English dictionary than actually misspelled, the spellchecker is not applied to the corpus for the rest of the analysis. 
+
+### Bigrams 
+
+As with unigrams, two sets of bigrams (word pairs) are generated: one with stopwords, and one without:
+
+```{r bigrams, cache = FALSE, eval = TRUE}
+# generate bigrams without stopwords
+bigram.no.stopwords <- tokens_ngrams(tokens.no.stopwords, n = 2, concatenator = " ")
+
+# generate bigrams with stopwords
+bigram.with.stopwords <- tokens_ngrams(text.tokens, n = 2, concatenator = " ")
+```
+
+Next, a document-feature matrix is created for the bigram case, without stopwords. During this process, all words are converted to lowercase and profanity and padding are removed:
+
+```{r bigram_dfm, cache = FALSE, eval = TRUE, warning = FALSE}
+# create the document-feature matrix
+text.bigram <- dfm(bigram.no.stopwords, 
+                    tolower = TRUE,
+                    remove_padding = TRUE,
+                    remove = bad.words,
+                    verbose = FALSE)
+```
+
+The 100 most frequent bigrams in the corpus are identified:
+
+```{r bigram_top_features_no_stopwords, cache = FALSE, eval = TRUE, warning = FALSE}
+# define most frequently-occurring bigrams
+bigram.top.features.no.stopwords <- topfeatures(text.bigram, 100)
+
+# create dataframe displaying most frequent bigrams
+bigram.top.features.no.stopwords.df <- data.frame(bigram = names(bigram.top.features.no.stopwords), freq = bigram.top.features.no.stopwords)
+
+# display the most frequent bigrams
+head(bigram.top.features.no.stopwords.df)
+```
+
+The frequencies of the most common bigrams are visualized here as a word cloud:
+
+```{r wordcloud_bigram, eval = TRUE, warning = FALSE}
+wordcloud(words = bigram.top.features.no.stopwords.df$bigram,
+              freq = bigram.top.features.no.stopwords.df$freq,
+              min.freq = 1,
+              max.words = 100,
+              random.order = FALSE,
+              rot.per = 0.35,
+              colors=brewer.pal(9, "Set1"))
+```
+
+The frequencies of the 15 most common words are shown using a histogram:
+
+```{r hist_bigram, eval = TRUE, warning = FALSE}
+# build histogram
+bigram_hist <- ggplot(bigram.top.features.no.stopwords.df[1:15,], aes(reorder(bigram.top.features.no.stopwords.df[1:15,]$bigram, -bigram.top.features.no.stopwords.df[1:15,]$freq), y = bigram.top.features.no.stopwords.df[1:15,]$freq))
+bigram_hist <- bigram_hist + geom_bar(stat = "Identity", fill = "aquamarine3")
+bigram_hist <- bigram_hist + xlab("bigram") + ylab("frequency") + ggtitle("15 Most Frequent Bigrams")
+bigram_hist <- bigram_hist + theme(plot.title = element_text(size = 14, hjust = 0.5, vjust = 0.5),
+               axis.text.x = element_text(hjust = 0.5, vjust = 0.5, angle = 45),
+               axis.text.y = element_text(hjust = 0.5, vjust = 0.5))
+
+# display histogram
+print(bigram_hist)
+```
+
+### Trigrams
+
+Finally, two sets of trigrams (groups of three words) are generated: one with stopwords, and one without:
+
+```{r trigrams, cache = FALSE, eval = TRUE}
+# generate trigrams without stopwords
+trigram.no.stopwords <- tokens_ngrams(tokens.no.stopwords, n = 3, concatenator = " ")
+
+# generate trigrams with stopwords
+trigram.with.stopwords <- tokens_ngrams(text.tokens, n = 3, concatenator = " ")
+```
+
+Next, a document-feature matrix is created for the trigram case, without stopwords. During this process, all words are converted to lowercase and profanity and padding are removed:
+
+```{r trigram_dfm, cache = FALSE, eval = TRUE, warning = FALSE}
+# create the document-feature matrix
+text.trigram <- dfm(trigram.no.stopwords, 
+                    tolower = TRUE,
+                    remove_padding = TRUE,
+                    remove = bad.words,
+                    verbose = FALSE)
+```
+
+The 100 most frequent trigrams in the corpus are identified:
+
+```{r trigram_top_features_no_stopwords, cache = FALSE, eval = TRUE, warning = FALSE}
+# define most frequently-occurring trigrams
+trigram.top.features.no.stopwords <- topfeatures(text.trigram, 100)
+
+# create dataframe displaying most frequent trigrams
+trigram.top.features.no.stopwords.df <- data.frame(trigram = names(trigram.top.features.no.stopwords), freq = trigram.top.features.no.stopwords)
+
+# display the most frequent trigrams
+head(trigram.top.features.no.stopwords.df)
+```
+
+The frequencies of the most common bigrams are visualized here as a word cloud:
+
+```{r wordcloud_trigram, eval = TRUE, warning = FALSE}
+wordcloud(words = trigram.top.features.no.stopwords.df$trigram,
+              freq = trigram.top.features.no.stopwords.df$freq,
+              min.freq = 1,
+              max.words = 100,
+              random.order = FALSE,
+              rot.per = 0.35,
+              colors=brewer.pal(9, "Set1"))
+```
+
+The frequencies of the 15 most common words are shown using a histogram:
+
+```{r hist_trigram, eval = TRUE, warning = FALSE}
+# build histogram
+trigram_hist <- ggplot(trigram.top.features.no.stopwords.df[1:15,], aes(reorder(trigram.top.features.no.stopwords.df[1:15,]$trigram, -trigram.top.features.no.stopwords.df[1:15,]$freq), y = trigram.top.features.no.stopwords.df[1:15,]$freq))
+trigram_hist <- trigram_hist + geom_bar(stat = "Identity", fill = "aquamarine3")
+trigram_hist <- trigram_hist + xlab("trigram") + ylab("frequency") + ggtitle("15 Most Frequent Trigrams")
+trigram_hist <- trigram_hist + theme(plot.title = element_text(size = 14, hjust = 0.5, vjust = 0.5),
+               axis.text.x = element_text(hjust = 0.5, vjust = 0.5, angle = 45),
+               axis.text.y = element_text(hjust = 0.5, vjust = 0.5))
+
+# display histogram
+print(trigram_hist)
+```
+
+### Saving Necessary Data
+
+The sets of unigrams, bigrams and trigrams are saved to disk in order to be applied in the next phase (building the predictive model):
+
+```{r save_text_data, eval = TRUE}
+# save unigram data
+saveRDS(unigram.with.stopwords, paste(wd, "/unigram-with-stopwords.rds", sep = ""))
+saveRDS(unigram.no.stopwords, paste(wd, "/unigram-no-stopwords.rds", sep = ""))
+
+# save bigram data
+saveRDS(bigram.with.stopwords, paste(wd, "/bigram-with-stopwords.rds", sep = ""))
+saveRDS(bigram.no.stopwords, paste(wd, "/bigram-no-stopwords.rds", sep = ""))
+
+# save trigram data
+saveRDS(trigram.with.stopwords, paste(wd, "/trigram-with-stopwords.rds", sep = ""))
+saveRDS(trigram.no.stopwords, paste(wd, "/trigram-no-stopwords.rds", sep = ""))
+```
+
+## Predictive Model Development: Next Steps 
+
+The predictive model will use a combination of unigrams, bigrams and trigrams to predict the next word, given some input text. These n-gram models can be stored as Markov chains, in order to reduce model complexity. Markov chains store the probabilities of transitioning to another state, given the current state, and are directly analogous to the probabilities of certain words occurring after a unigram, bigram or trigram. Predicted words can be determined via backoff models. One approach is to first consider the probability distribution of the next word given a trigram. If the trigram does not exist, the probability distribution from the bigram is considered, and likewise the unigram model if necessary. However, with limited data in the corpus, predictions for a given trigram or even bigram may be highly limited and/or focused on one topic. This can be handled by applying relative weights to trigrams, bigrams and unigrams in the predictive model. For example, the "Stupid Backoff" method applies scores to each n-gram category based on relative frequencies.
+
+An important question to consider is how to increase the coverage of the English language, through identifying words that are not in the corpus or using a smaller number of words in the dictionary to cover the same number of phrases. Given memory constraints, the current corpus only contains 36,096 words, and it is possible that the user will enter a word as input not already recognized in the corpus. This can be tackled by classifying a small percentage of words with few occurrences as "unknown," calculating the probability distribution of the words that follow them, and applying that distribution to words that do not appear in the corpus. This classification simplifies the model as well, by reducing the total unique number of words in the corpus. 
+
+Furthermore, synonyms can all be represented as the same word in the predictive model, often resulting in new words from the user being classified as words already existing in the corpus.
+
+The final model will be deployed as a Shiny application.
