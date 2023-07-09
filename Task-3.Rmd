@@ -1,0 +1,274 @@
+---
+title: "Task 3"
+author: "Anne Strader"
+date: "2023-07-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, echo = FALSE, warning = FALSE, message = FALSE}
+library(quanteda)
+library(quanteda.textstats)
+```
+
+## Task 3: Modeling
+
+In this task, the primary goal is to model probabilities of certain words occurring given an n-gram. The final result will be a series of probability tables for words following observed n-grams. Previously, the frequencies of unigrams, bigrams and trigrams were investigated without stopwords, to understand the relative frequency of words other than more commonly-used articles, conjunctions, etc. In the predictive model, which will be developed in Task 4, stopwords will be included in order to predict natural-sounding English text. 
+
+The following steps are carried out:
+
+1. The data and supplementary files (i.e., the list of profanity to be filtered) are read in and the corpus is generated from a sample of the data.
+2. The word tokenization steps described in Task 2 (see the milestone report) are rewritten in the form of a function for easier implementation in the Shiny app.
+3. Word tokenization is performed on the corpus.
+4. The steps to generate sets of n-grams are rewritten in the form of a function for easier implementation in the Shiny app.
+5. Sets of unigrams, bigrams, trigrams, 4-grams and 5-grams are generated. Unlike in Task 2, 4-grams and 5-grams are included in Task 3, with the goal of improving prediction model accuracy. The n-gram data are exported as prediction tables, in the form of .csv files.
+
+Please note that all functions introduced here will also be included in the file "text-predict-funcs.R", which will be sourced when running the Shiny app.
+
+### Reading in Data and Building Corpus
+
+In this section, the procedure is the same as in Task 2. For more detail about the contents of the original dataset, see the milestone report.
+
+First, the full dataset is downloaded from [here](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip).
+
+```{r dl_time_lim, warning = FALSE, message = FALSE}
+options(timeout=500)
+```
+
+``` {r download_data, eval = TRUE}
+# define working directory
+wd <- "D:/Desktop/online-courses/Coursera/Data Science Specialization/Course 10 Data Science Capstone/course-project"
+
+# define URL where Capstone dataset will be downloaded
+url <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+
+# define name and destination of downloaded file 
+data.path <- paste(wd, "/SwiftKey-Data.zip", sep = "")
+
+# if the file containing the SwiftKey data does not yet exist, download the dataset
+if (!file.exists(data.path)){
+        download.file(url, data.path, mode = "wb")
+}
+```
+
+Then, the downloaded dataset is unzipped:
+
+``` {r unzip_file, eval = TRUE}
+# define path to unzipped file 
+data.files.path <- paste(wd, "/final", sep = "")
+
+# unzip file if necessary
+if(!file.exists(data.files.path)){
+        unzip(zipfile = data.files.path)
+}     
+```
+
+```{r, look_dirs_EN, eval = TRUE}
+# define path to English-language data
+data.files.path.EN <- paste(data.files.path, "/en_US", sep = "")
+```
+
+Next, the data are read into R: 
+
+```{r, read_full_datasets, cache = FALSE, warning = FALSE, eval = TRUE}
+# assign a variable name to each English dataset:
+blog.file <- paste(data.files.path.EN, "/en_US.blogs.txt", sep = "")  # blogs
+news.file <- paste(data.files.path.EN, "/en_US.news.txt", sep = "")  # news
+twitter.file <- paste(data.files.path.EN, "/en_US.twitter.txt", sep = "")  # Twitter
+
+# read in blog data
+blog.file.con <- file(blog.file, open = "r")
+blog.text <- readLines(blog.file.con, encoding = "UTF-8", skipNul = TRUE)
+close(blog.file.con)
+
+# read in news data
+news.file.con <- file(news.file, open = "r")
+news.text <- readLines(news.file.con, encoding = "UTF-8", skipNul = TRUE)
+close(news.file.con)
+
+# read in Twitter data
+twitter.file.con <- file(twitter.file, open = "r")
+twitter.text <- readLines(twitter.file.con, encoding = "UTF-8", skipNul = TRUE)
+close(twitter.file.con)
+```
+
+As we saw in the previous tasks, each of the three file sizes are quite large. Using all of the data would substantially increase computation times; therefore, 5,000 lines are selected from each file to be cleaned and combined into a unified dataset:
+
+```{r sample_data, cache = FALSE, eval = TRUE}
+# set the seed to ensure reproducible results
+set.seed(59284)
+
+# set sample size
+sample.size <- 5000
+
+# sample data from each text file 
+sample.blog <- sample(blog.text, sample.size, replace = FALSE)
+sample.news <- sample(news.text, sample.size, replace = FALSE)
+sample.twitter <- sample(twitter.text, sample.size, replace = FALSE)
+```
+
+The three samples are then combined into one data file:
+
+```{r combine_samples, cache = FALSE, eval = TRUE}
+# combine the data
+combined.sample <- c(sample.blog, sample.news, sample.twitter)
+
+# define filename for sample data
+combined.sample.filename <- "sample_data_EN.txt"
+
+# write combined sample data to file 
+combined.sample.con <- file(combined.sample.filename, open = "w")
+writeLines(combined.sample, combined.sample.con)
+close(combined.sample.con)
+```
+
+The dataset is then unified into a corpus, using the r package "quanteda". This package was chosen due to its efficiency in processing large amounts of text data relative to other R packages. 
+
+```{r build_corpus, cache = FALSE, eval = TRUE}
+text.EN.corpus <- corpus(combined.sample)
+```
+
+### Data Processing and Tokenization Function
+
+The data processing and  word tokenization are combined into R functions which can easily be implemented in the Shiny app.
+
+First, a function is written to download and read in the list of profane words to be filtered out:
+
+```{r read_profanity_fn}
+read.profanity <- function() {
+    # INPUT:
+    # nothing
+    # OUTPUT:
+    # bad.words = list of profane words
+    
+    # define name and destination of downloaded file
+    data.path <- paste(getwd(), "/bad-words.txt", sep = "")
+
+    # define URL where text file containing a list of profane words/phrases can be downloaded
+    url <- "http://www.cs.cmu.edu/~biglou/resources/bad-words.txt"
+
+    # if necessary, download the text file
+    if (!file.exists(data.path)){
+        download.file(url, data.path, mode = "wb")
+    }
+
+    # read the lines of the text file containing profanities
+    bad.words.con <- file(data.path, open = "r")
+    bad.words <- readLines(bad.words.con, encoding = "UTF-8", skipNul = TRUE)
+    close(bad.words.con)
+    bad.words
+}
+```
+
+The next function tokenizes the corpus into words and performs the following data processing:
+
+1. Website URLs, Twitter handles and email addresses are removed.
+2. Non-ASCII characters are removed.
+3. Numbers are removed.
+4. Punctuation is removed.
+5. Extra white space is removed.
+6. Profanity is removed
+
+```{r token_function}
+generate.tokens <- function(corpus, profanity) {
+    # INPUT:
+    # corpus = text corpus (quanteda corpus object)
+    # profanity = list of profane words 
+    
+    # OUTPUT:
+    # text.tokens = quanteda tokens object containing word tokens from corpus 
+    
+    # tokenize the corpus into words and perform all data processing in steps 1-5
+    text.tokens <- tokens(text.EN.corpus,
+                      what="word1",
+                      remove_numbers = TRUE,
+                      remove_punct = TRUE,
+                      remove_url =TRUE,
+                      remove_separators = TRUE,
+                      remove_symbols = TRUE,
+                      verbose = quanteda_options("verbose"))
+    
+    # remove profanity (data processing step 6)
+    text.tokens <- tokens_remove(text.tokens, pattern = profanity)
+}
+```
+
+### Word Tokenization
+
+Using the functions from the previous section, the list of profanity is read in and the corpus is tokenized into words.
+
+Reading in profanity:
+
+```{r read_profanity}
+profanity <- read.profanity()
+```
+
+Word tokenization:
+
+```{r generate_word_tokens}
+text.tokens <- generate.tokens(text.EN.corpus, profanity)
+```
+
+### Function to generate n-grams 
+
+The following function performs the following, given a set of tokens (quanteda tokens object) and n-value (1-gram, 2-gram, 3-gram, etc.):
+
+1. Divides the tokens into n-grams of length n = num.grams.
+2. Creates a document-feature matrix (converting all tokens into lowercase and removing extra white space).
+3. Produces a data frame listing each n-gram and its corresponding frequency.
+
+```{r generate_ngrams_func}
+gen.ngrams <- function(text.tokens, num.grams) {
+    # INPUT: 
+    # text.tokens = word tokens (quanteda tokens object)
+    # num.grams = number of words in n-gram (1-gram, 2-gram, 3-gram, etc.)
+    
+    # OUTPUT
+    # ngrams.freqs = dataframe containing a list of ngrams and their corresponding frequencies
+    
+    # create a tokens object containing a list of character vectors of n-grams
+    tokens.ngrams <- tokens_ngrams(text.tokens, n = num.grams, concatenator = ' ')
+    
+    # create a document-feature matrix, converting all n-grams to lowercase and removing extra white space
+    dfm.tokens.ngrams <- dfm(tokens.ngrams, tolower = TRUE, remove_padding = TRUE)
+    
+    # create a dataframe listing each n-gram and its corresponding frequency
+    ngrams.freqs <- textstat_frequency(dfm.tokens.ngrams)
+}
+```
+
+### Generating n-grams 
+
+Next, sets of unigrams, bigrams, trigrams, 4-grams and 5-grams are generated and saved to disk, to be used in the predictive model in the next step (Task 4):
+
+Generating n-grams:
+
+```{r generate_ngrams}
+# unigrams 
+unigrams <- gen.ngrams(text.tokens, 1)
+# bigrams
+bigrams <- gen.ngrams(text.tokens, 2)
+# trigrams 
+trigrams <- gen.ngrams(text.tokens, 3)
+# 4-grams 
+quadgrams <- gen.ngrams(text.tokens, 4)
+# 5-grams 
+quingrams <- gen.ngrams(text.tokens, 5)
+```
+
+Writing n-grams to files:
+```{r save_ngrams}
+# unigrams
+write.csv(unigrams, paste0(getwd(), "/1gram.csv"), row.names = FALSE)
+# bigrams 
+write.csv(bigrams, paste0(getwd(), "/2gram.csv"), row.names = FALSE)
+# trigrams
+write.csv(trigrams, paste0(getwd(), "/3gram.csv"), row.names = FALSE)
+# 4-grams 
+write.csv(quadgrams, paste0(getwd(), "/4gram.csv"), row.names = FALSE)
+# 5-grams
+write.csv(quingrams, paste0(getwd(), "/5gram.csv"), row.names = FALSE)
+```
