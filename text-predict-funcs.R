@@ -63,14 +63,14 @@ generate.tokens <- function(corpus, profanity) {
     text.tokens <- tokens_remove(text.tokens, pattern = profanity)
 }
 
-# generate n-grams from quanteda token object 
+# generate n-gram prediction tables from quanteda token object 
 
 gen.ngrams <- function(text.tokens, num.grams) {
     # INPUT: 
     # text.tokens = word tokens (quanteda tokens object)
     # num.grams = number of words in n-gram (1-gram, 2-gram, 3-gram, etc.)
     
-    # OUTPUT
+    # OUTPUT:
     # ngrams.freqs = dataframe containing a list of ngrams and their corresponding frequencies
     
     # create a tokens object containing a list of character vectors of n-grams
@@ -81,5 +81,15 @@ gen.ngrams <- function(text.tokens, num.grams) {
     
     # create a dataframe listing each n-gram and its corresponding frequency
     ngrams.freqs <- textstat_frequency(dfm.tokens.ngrams)
+    
+    # for n >= 2 n-grams:
+    # add a column containing all but the last word in the n-gram
+    # add a column containing the predicted word
+    if (num.grams >= 2) {
+        ngrams.freqs$match.text <- unlist(strsplit(ngrams.freqs$feature, " [^ ]+$"))
+        ngrams.freqs$prediction <- sub('.* (.*)$','\\1', ngrams.freqs$feature)
+    }
+    
+    ngrams.freqs
 }
 

@@ -547,6 +547,11 @@ is read in and the corpus is tokenized into words.</p>
 lowercase).</li>
 <li>Produces a data frame listing each n-gram and its corresponding
 frequency.</li>
+<li>In the case of n &gt;= 2 n-grams (bigrams and higher order): two
+columns are added to the data frame. The first contains all words in the
+n-gram except for the last one. These should be checked against input
+text when testing the prediction model. The second column contains the
+predicted word, given a match between the input and the text.</li>
 </ol>
 <pre class="r"><code>gen.ngrams &lt;- function(text.tokens, num.grams) {
     # INPUT: 
@@ -564,13 +569,23 @@ frequency.</li>
     
     # create a dataframe listing each n-gram and its corresponding frequency
     ngrams.freqs &lt;- textstat_frequency(dfm.tokens.ngrams)
+    
+    # for n &gt;= 2 n-grams:
+    # add a column containing all but the last word in the n-gram
+    # add a column containing the predicted word
+    if (num.grams &gt;= 2) {
+        ngrams.freqs$match.text &lt;- unlist(strsplit(ngrams.freqs$feature, &quot; [^ ]+$&quot;))
+        ngrams.freqs$prediction &lt;- sub(&#39;.* (.*)$&#39;,&#39;\\1&#39;, ngrams.freqs$feature)
+    }
+    
+    ngrams.freqs
 }</code></pre>
 </div>
 <div id="generating-n-grams" class="section level3">
 <h3>Generating n-grams</h3>
 <p>Next, sets of unigrams, bigrams, trigrams, 4-grams and 5-grams are
-generated and saved to disk, to be used in the predictive model in the
-next step (Task 4):</p>
+generated, to be used in the predictive model in the next step (Task
+4):</p>
 <p>Generating n-grams:</p>
 <pre class="r"><code># unigrams 
 unigrams &lt;- gen.ngrams(text.tokens, 1)
@@ -582,16 +597,16 @@ trigrams &lt;- gen.ngrams(text.tokens, 3)
 quadgrams &lt;- gen.ngrams(text.tokens, 4)
 # 5-grams 
 quingrams &lt;- gen.ngrams(text.tokens, 5)</code></pre>
-<p>Writing n-grams to files:</p>
+<p>Writing n-gram frequency tables to .csv files:</p>
 <pre class="r"><code># unigrams
 write.csv(unigrams, paste0(getwd(), &quot;/1gram.csv&quot;), row.names = FALSE)
-# bigrams 
+# bigrams
 write.csv(bigrams, paste0(getwd(), &quot;/2gram.csv&quot;), row.names = FALSE)
 # trigrams
 write.csv(trigrams, paste0(getwd(), &quot;/3gram.csv&quot;), row.names = FALSE)
 # 4-grams 
 write.csv(quadgrams, paste0(getwd(), &quot;/4gram.csv&quot;), row.names = FALSE)
-# 5-grams
+# 5-grams 
 write.csv(quingrams, paste0(getwd(), &quot;/5gram.csv&quot;), row.names = FALSE)</code></pre>
 </div>
 </div>

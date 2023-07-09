@@ -12,6 +12,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r load_libraries, echo = FALSE, warning = FALSE, message = FALSE}
 library(quanteda)
 library(quanteda.textstats)
+library(stringr)
+library(data.table)
 ```
 
 ## Task 3: Modeling
@@ -220,6 +222,7 @@ The following function performs the following, given a set of tokens (quanteda t
 1. Divides the tokens into n-grams of length n = num.grams.
 2. Creates a document-feature matrix (converting all tokens into lowercase).
 3. Produces a data frame listing each n-gram and its corresponding frequency.
+4. In the case of n >= 2 n-grams (bigrams and higher order): two columns are added to the data frame. The first contains all words in the n-gram except for the last one. These should be checked against input text when testing the prediction model. The second column contains the predicted word, given a match between the input and the text. 
 
 ```{r generate_ngrams_func}
 gen.ngrams <- function(text.tokens, num.grams) {
@@ -238,12 +241,22 @@ gen.ngrams <- function(text.tokens, num.grams) {
     
     # create a dataframe listing each n-gram and its corresponding frequency
     ngrams.freqs <- textstat_frequency(dfm.tokens.ngrams)
+    
+    # for n >= 2 n-grams:
+    # add a column containing all but the last word in the n-gram
+    # add a column containing the predicted word
+    if (num.grams >= 2) {
+        ngrams.freqs$match.text <- unlist(strsplit(ngrams.freqs$feature, " [^ ]+$"))
+        ngrams.freqs$prediction <- sub('.* (.*)$','\\1', ngrams.freqs$feature)
+    }
+    
+    ngrams.freqs
 }
 ```
 
 ### Generating n-grams 
 
-Next, sets of unigrams, bigrams, trigrams, 4-grams and 5-grams are generated and saved to disk, to be used in the predictive model in the next step (Task 4):
+Next, sets of unigrams, bigrams, trigrams, 4-grams and 5-grams are generated, to be used in the predictive model in the next step (Task 4):
 
 Generating n-grams:
 
@@ -260,17 +273,16 @@ quadgrams <- gen.ngrams(text.tokens, 4)
 quingrams <- gen.ngrams(text.tokens, 5)
 ```
 
-Writing n-grams to files:
-
-```{r save_ngrams}
+Writing n-gram frequency tables to .csv files:
+```{r save_ngram_tables}
 # unigrams
 write.csv(unigrams, paste0(getwd(), "/1gram.csv"), row.names = FALSE)
-# bigrams 
+# bigrams
 write.csv(bigrams, paste0(getwd(), "/2gram.csv"), row.names = FALSE)
 # trigrams
 write.csv(trigrams, paste0(getwd(), "/3gram.csv"), row.names = FALSE)
 # 4-grams 
 write.csv(quadgrams, paste0(getwd(), "/4gram.csv"), row.names = FALSE)
-# 5-grams
+# 5-grams 
 write.csv(quingrams, paste0(getwd(), "/5gram.csv"), row.names = FALSE)
 ```
