@@ -141,6 +141,7 @@ First, a function is written to download and read in the list of profane words t
 read.profanity <- function() {
     # INPUT:
     # nothing
+    
     # OUTPUT:
     # bad.words = list of profane words
     
@@ -217,7 +218,7 @@ text.tokens <- generate.tokens(text.EN.corpus, profanity)
 The following function performs the following, given a set of tokens (quanteda tokens object) and n-value (1-gram, 2-gram, 3-gram, etc.):
 
 1. Divides the tokens into n-grams of length n = num.grams.
-2. Creates a document-feature matrix (converting all tokens into lowercase and removing extra white space).
+2. Creates a document-feature matrix (converting all tokens into lowercase).
 3. Produces a data frame listing each n-gram and its corresponding frequency.
 
 ```{r generate_ngrams_func}
@@ -226,14 +227,14 @@ gen.ngrams <- function(text.tokens, num.grams) {
     # text.tokens = word tokens (quanteda tokens object)
     # num.grams = number of words in n-gram (1-gram, 2-gram, 3-gram, etc.)
     
-    # OUTPUT
+    # OUTPUT:
     # ngrams.freqs = dataframe containing a list of ngrams and their corresponding frequencies
     
     # create a tokens object containing a list of character vectors of n-grams
     tokens.ngrams <- tokens_ngrams(text.tokens, n = num.grams, concatenator = ' ')
     
     # create a document-feature matrix, converting all n-grams to lowercase and removing extra white space
-    dfm.tokens.ngrams <- dfm(tokens.ngrams, tolower = TRUE, remove_padding = TRUE)
+    dfm.tokens.ngrams <- dfm(tokens.ngrams, tolower = TRUE)
     
     # create a dataframe listing each n-gram and its corresponding frequency
     ngrams.freqs <- textstat_frequency(dfm.tokens.ngrams)

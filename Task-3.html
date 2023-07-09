@@ -475,6 +475,7 @@ profane words to be filtered out:</p>
 <pre class="r"><code>read.profanity &lt;- function() {
     # INPUT:
     # nothing
+    
     # OUTPUT:
     # bad.words = list of profane words
     
@@ -543,7 +544,7 @@ is read in and the corpus is tokenized into words.</p>
 <ol style="list-style-type: decimal">
 <li>Divides the tokens into n-grams of length n = num.grams.</li>
 <li>Creates a document-feature matrix (converting all tokens into
-lowercase and removing extra white space).</li>
+lowercase).</li>
 <li>Produces a data frame listing each n-gram and its corresponding
 frequency.</li>
 </ol>
@@ -552,14 +553,14 @@ frequency.</li>
     # text.tokens = word tokens (quanteda tokens object)
     # num.grams = number of words in n-gram (1-gram, 2-gram, 3-gram, etc.)
     
-    # OUTPUT
+    # OUTPUT:
     # ngrams.freqs = dataframe containing a list of ngrams and their corresponding frequencies
     
     # create a tokens object containing a list of character vectors of n-grams
     tokens.ngrams &lt;- tokens_ngrams(text.tokens, n = num.grams, concatenator = &#39; &#39;)
     
     # create a document-feature matrix, converting all n-grams to lowercase and removing extra white space
-    dfm.tokens.ngrams &lt;- dfm(tokens.ngrams, tolower = TRUE, remove_padding = TRUE)
+    dfm.tokens.ngrams &lt;- dfm(tokens.ngrams, tolower = TRUE)
     
     # create a dataframe listing each n-gram and its corresponding frequency
     ngrams.freqs &lt;- textstat_frequency(dfm.tokens.ngrams)
