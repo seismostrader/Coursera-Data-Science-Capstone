@@ -261,6 +261,7 @@ quingrams <- gen.ngrams(text.tokens, 5)
 ```
 
 Writing n-grams to files:
+
 ```{r save_ngrams}
 # unigrams
 write.csv(unigrams, paste0(getwd(), "/1gram.csv"), row.names = FALSE)
