@@ -43,7 +43,7 @@ read.profanity <- function() {
 
 generate.tokens <- function(corpus, profanity) {
     # INPUT:
-    # corpus = text corpus (quanteda corpus object)
+    # corpus = text corpus (quanteda corpus object) OR character object (in the case of input text)
     # profanity = list of profane words 
     
     # OUTPUT:
@@ -54,7 +54,7 @@ generate.tokens <- function(corpus, profanity) {
                           what="word1",
                           remove_numbers = TRUE,
                           remove_punct = TRUE,
-                          remove_url =TRUE,
+                          remove_url = TRUE,
                           remove_separators = TRUE,
                           remove_symbols = TRUE,
                           verbose = quanteda_options("verbose"))

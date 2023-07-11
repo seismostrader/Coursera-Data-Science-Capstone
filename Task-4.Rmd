@@ -1,0 +1,237 @@
+---
+title: "Task 4"
+author: "Anne Strader"
+date: "2023-07-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, echo = FALSE, warning = FALSE, message = FALSE}
+library(quanteda)
+```
+
+## Task 4: Prediction Model
+
+In this task, the initial text prediction model is developed, based on the SwiftKey English-language dataset. This model is a simplified version of Katz's backoff model. The backoff model is based on a set of n-grams of varying lengths (unigrams, bigrams, trigrams, etc.) and functions as follows:
+
+1. Read in some input text and apply the same processing to it as with the tokens in Tasks 2 (Exploratory Analysis) and 3 (Modeling). 
+2. Recall that for n-grams with order >= 2, two columns were created in their corresponding tables. The first column contains all but the last word of the n-gram, and is the text to be matched by the input. The second column contains the word that would be predicted, given that the input text matches the first word(s) of the n-gram. Starting with the highest-order n-gram frequencies (in this case, 5-gram frequencies), determine if there is an n-gram that matches the last "n-1" words of the input text. If there is a match, the word with the highest probability of following the four words, based on the available 5-gram(s), will be selected as the prediction. 
+3. If no matching n-grams are identified, then the last "n-2" words of the input text are selected and the predictive tables are checked for matching n-grams of the next lowest order. For example, if there were no matching 5-grams, the last three words of the input text will be checked against the first three words of the 4-grams. If a match is found, the last word of the most frequently-occurring 4-gram will be selected as the prediction.
+4. If no match was identified between the last word of the input text and the first word of a bigram, the most frequently-occurring unigram is predicted.
+
+As with Task 3, all functions introduced in this task will be included in the "text-predict-funcs.R" file, for easy implementation in the Shiny app. 
+
+### Loading the Data and Setting Necessary Parameters
+
+First, the unigram, bigram, trigram, 4-gram and 5-gram datasets generated in the last step of Task 3 are loaded:
+
+```{r read_in_ngrams}
+# unigrams
+freq.1grams <- read.csv(paste0(getwd(), "/1gram.csv"))
+#bigrams
+freq.2grams <- read.csv(paste0(getwd(), "/2gram.csv"))
+#trigrams
+freq.3grams <- read.csv(paste0(getwd(), "/3gram.csv"))
+# 4-grams
+freq.4grams <- read.csv(paste0(getwd(), "/4gram.csv"))
+# 5-grams
+freq.5grams <- read.csv(paste0(getwd(), "/5gram.csv"))
+```
+
+Then, the highest-order n-gram used in this task is defined:
+
+```{r define_highest_order_ngram}
+highest.order <- 5
+```
+
+### Backoff Model Functions
+
+A set of functions is introduced to run the backoff model.
+
+There are some functions needed from Task 3 to run the prediction model; these are provided here:
+
+Reading in profanity and generating a list of words to filter out:
+
+```{r read_profanity_fn}
+read.profanity <- function() {
+    # INPUT:
+    # nothing
+    
+    # OUTPUT:
+    # bad.words = list of profane words
+    
+    # define name and destination of downloaded file
+    data.path <- paste(getwd(), "/bad-words.txt", sep = "")
+
+    # define URL where text file containing a list of profane words/phrases can be downloaded
+    url <- "http://www.cs.cmu.edu/~biglou/resources/bad-words.txt"
+
+    # if necessary, download the text file
+    if (!file.exists(data.path)){
+        download.file(url, data.path, mode = "wb")
+    }
+
+    # read the lines of the text file containing profanities
+    bad.words.con <- file(data.path, open = "r")
+    bad.words <- readLines(bad.words.con, encoding = "UTF-8", skipNul = TRUE)
+    close(bad.words.con)
+    bad.words
+}
+```
+
+Input text word tokenization and trimming:
+
+```{r token_function}
+generate.tokens.from.input <- function(input.text, profanity, highest.order.n = 5) {
+    # INPUT:
+    # corpus = text corpus (quanteda corpus object) OR character object (in the case of input text)
+    # profanity = list of profane words 
+    # highest.order.n = highest-order n-gram used in the model
+    
+    # OUTPUT:
+    # text.tokens = processed and trimmed character vector containing word tokens from input text
+    
+    # tokenize the corpus into words and perform all basic data processing
+    text.tokens <- tokens(input.text,
+                      what="word1",
+                      remove_numbers = TRUE,
+                      remove_punct = TRUE,
+                      remove_url = TRUE,
+                      remove_separators = TRUE,
+                      remove_symbols = TRUE,
+                      
+                      verbose = quanteda_options("verbose"))
+    
+    # remove profanity 
+    text.tokens <- tokens_remove(text.tokens, pattern = profanity)
+    
+    # make all words lowercase
+    text.tokens <- tolower(text.tokens)
+    
+    # convert from quanteda tokens object to character vector
+    text.tokens <- as.character(text.tokens)
+    
+    # if necessary, the text is trimmed to the last n-1 words
+    if (length(text.tokens) > highest.order.n - 1) {
+        text.tokens <- tail(text.tokens, n = highest.order.n - 1)
+    }
+}
+```
+
+The following function identifies the most commonly-occurring unigram:
+
+```{r define_most_freq_unigram}
+def.most.freq.unigram <- function(unigrams) {
+    # INPUT:
+    # unigrams = dataframe containing frequencies of unigrams (as generated in Task 3)
+    
+    # OUTPUT:
+    # most.freq.unigram = most frequently-occurring unigram
+    
+    # define most frequently-occurring unigram
+    most.freq.unigram <- unigrams[1, "feature"]
+}
+```
+
+The following two functions run the simplified backoff prediction model, given input text:
+
+Main text prediction function:
+
+```{r backoff1_predict_next_word}
+backoff1.predict.next.word <- function(input.text, profanity, highest.order.n) {
+    # INPUT: 
+    # input.text = some input text 
+    # profanity = list of profane words to be filtered during input text processing 
+    # highest.order.n = highest-order n-gram used in prediction model 
+    
+    # OUTPUT: 
+    # predicted.word <- word predicted by model
+    
+    # process and trim input data
+    processed.input.text <- generate.tokens.from.input(input.text, profanity, highest.order.n = highest.order.n)
+    
+    # calculate initial length of input text 
+    initial.len.input.text <- length(processed.input.text)
+    
+    # iteratively check for a match between the input text and n-gram feature, starting with highest-order n-grams
+    # 5-grams
+    predicted.word <- text.matching(processed.input.text, freq.5grams)
+    
+    # 4-grams 
+    if (is.na(predicted.word)) {
+        # if the input text has a length greater than 3, remove the first word
+        if (length(processed.input.text) > 3) {
+            processed.input.text <- tail(processed.input.text, 3)
+        }
+        
+        # check for match
+        predicted.word <- text.matching(processed.input.text, freq.4grams)
+        
+        # trigrams 
+        if (is.na(predicted.word)) {
+            # if the input text has a length greater than 2, remove the first word
+            if (length(processed.input.text) > 2) {
+                processed.input.text <- tail(processed.input.text, 2)
+            }
+            
+            # check for match
+            predicted.word <- text.matching(processed.input.text, freq.3grams)
+            
+            # bigrams 
+            if (is.na(predicted.word)) {
+                # if the input text has a length greater than 1, remove the first word
+                if (length(processed.input.text) > 1) {
+                    processed.input.text <- tail(processed.input.text, 1)
+                }
+                
+                # check for match
+                predicted.word <- text.matching(processed.input.text, freq.2grams)
+                
+                # unigrams 
+                if (is.na(predicted.word)) {
+                    predicted.word <- most.freq.unigram
+                }
+            }
+        }
+        
+    }
+    
+    return(predicted.word)
+    
+}
+```
+
+Function to search for match between n-gram frequency table and input text:
+
+```{r text_match_fn}
+text.matching <- function(input.text, ngrams.freq) {
+    # reduce dimensionality of input text to 1
+    input.text <- paste(input.text, collapse = " ")
+    
+    # check for match between feature and input text
+    predicted.word <- ngrams.freq[match(input.text, ngrams.freq$match.text), ]$prediction
+}
+```
+
+### Text Prediction with Simple Backoff Model: Preparation
+
+First, the most commonly-occurring unigram is identified:
+
+```{r get_most_freq_unigram}
+most.freq.unigram <- def.most.freq.unigram(freq.1grams)
+```
+
+Next, the list of profane words is generated:
+
+```{r read_profanity}
+profanity <- read.profanity()
+```
+
+### Testing Simple Backoff Prediction Model
+
+The model was tested on Quiz 2; however, the accuracy was quite low. For half the questions, the recommended word was one that would be classified as a stopword (for example: the, and, be). While the prediction of a stopword is often logical and the next word that a user would type when forming a query, the model results are too generalized. The next iteration of the prediction model should be able to generate a greater variety of predictions, yielding greater accuracy during testing while minimizing computation time. 
+
+Furthermore, the amount of information stored in the n-grams could be increased, as the original sample sizes (5000 lines of text each from blogs, news and Twitter feeds) are very small relative to the original text data. 
