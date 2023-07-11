@@ -93,3 +93,126 @@ gen.ngrams <- function(text.tokens, num.grams) {
     ngrams.freqs
 }
 
+# process, tokenize and trim text input
+
+generate.tokens.from.input <- function(input.text, profanity, highest.order.n = 5) {
+    # INPUT:
+    # corpus = text corpus (quanteda corpus object) OR character object (in the case of input text)
+    # profanity = list of profane words 
+    # highest.order.n = highest-order n-gram used in the model
+    
+    # OUTPUT:
+    # text.tokens = processed and trimmed character vector containing word tokens from input text
+    
+    # tokenize the corpus into words and perform all basic data processing
+    text.tokens <- tokens(input.text,
+                          what="word1",
+                          remove_numbers = TRUE,
+                          remove_punct = TRUE,
+                          remove_url = TRUE,
+                          remove_separators = TRUE,
+                          remove_symbols = TRUE,
+                          
+                          verbose = quanteda_options("verbose"))
+    
+    # remove profanity 
+    text.tokens <- tokens_remove(text.tokens, pattern = profanity)
+    
+    # make all words lowercase
+    text.tokens <- tolower(text.tokens)
+    
+    # convert from quanteda tokens object to character vector
+    text.tokens <- as.character(text.tokens)
+    
+    # if necessary, the text is trimmed to the last n-1 words
+    if (length(text.tokens) > highest.order.n - 1) {
+        text.tokens <- tail(text.tokens, n = highest.order.n - 1)
+    }
+}
+
+# identify the most commonly-occurring unigram
+
+def.most.freq.unigram <- function(unigrams) {
+    # INPUT:
+    # unigrams = dataframe containing frequencies of unigrams (as generated in Task 3)
+    
+    # OUTPUT:
+    # most.freq.unigram = most frequently-occurring unigram
+    
+    # define most frequently-occurring unigram
+    most.freq.unigram <- unigrams[1, "feature"]
+}
+
+# main prediction function for simple backoff model
+
+backoff1.predict.next.word <- function(input.text, profanity, highest.order.n) {
+    # INPUT: 
+    # input.text = some input text 
+    # profanity = list of profane words to be filtered during input text processing 
+    # highest.order.n = highest-order n-gram used in prediction model 
+    
+    # OUTPUT: 
+    # predicted.word <- word predicted by model
+    
+    # process and trim input data
+    processed.input.text <- generate.tokens.from.input(input.text, profanity, highest.order.n = highest.order.n)
+    
+    # calculate initial length of input text 
+    initial.len.input.text <- length(processed.input.text)
+    
+    # iteratively check for a match between the input text and n-gram feature, starting with highest-order n-grams
+    # 5-grams
+    predicted.word <- text.matching(processed.input.text, freq.5grams)
+    
+    # 4-grams 
+    if (is.na(predicted.word)) {
+        # if the input text has a length greater than 3, remove the first word
+        if (length(processed.input.text) > 3) {
+            processed.input.text <- tail(processed.input.text, 3)
+        }
+        
+        # check for match
+        predicted.word <- text.matching(processed.input.text, freq.4grams)
+        
+        # trigrams 
+        if (is.na(predicted.word)) {
+            # if the input text has a length greater than 2, remove the first word
+            if (length(processed.input.text) > 2) {
+                processed.input.text <- tail(processed.input.text, 2)
+            }
+            
+            # check for match
+            predicted.word <- text.matching(processed.input.text, freq.3grams)
+            
+            # bigrams 
+            if (is.na(predicted.word)) {
+                # if the input text has a length greater than 1, remove the first word
+                if (length(processed.input.text) > 1) {
+                    processed.input.text <- tail(processed.input.text, 1)
+                }
+                
+                # check for match
+                predicted.word <- text.matching(processed.input.text, freq.2grams)
+                
+                # unigrams 
+                if (is.na(predicted.word)) {
+                    predicted.word <- most.freq.unigram
+                }
+            }
+        }
+        
+    }
+    
+    return(predicted.word)
+    
+}
+
+# check if input text matches n-gram feature (simple backoff model)
+
+text.matching <- function(input.text, ngrams.freq) {
+    # reduce dimensionality of input text to 1
+    input.text <- paste(input.text, collapse = " ")
+    
+    # check for match between feature and input text
+    predicted.word <- ngrams.freq[match(input.text, ngrams.freq$match.text), ]$prediction
+}
