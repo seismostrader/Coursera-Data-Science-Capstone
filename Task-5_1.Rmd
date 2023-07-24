@@ -1,0 +1,277 @@
+---
+title: "Task 5 Part 1"
+author: "Anne Strader"
+date: "2023-07-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, echo = FALSE, warning = FALSE, message = FALSE}
+library(quanteda)
+library(quanteda.textstats)
+```
+
+## Task 5: Creative Exploration 
+
+In Task 4 of the JHU Data Science Capstone project, "Prediction Model," a simple backoff text prediction model was generated from a combination of unigrams, bigrams, trigrams, 4-grams and 5-grams. Each n-gram with n > 2 was split into an n-1 gram, the model's "feature," and the final word, or "prediction." Stopwords were included to generate more natural speech patterns. Some cursory tests were performed, including through Quiz 2, showing that the although the output of the model was fairly logical, its accuracy was lacking. One advantage of the model, however, was its quick performance due to a relatively small text data sample that was used to generate it. Therefore, it is possible to consider applying larger amounts of data to generate the predictive model, as well as introduce higher-order n-grams that may improve word prediction from longer phrases.
+
+The following changes are implemented in the next iteration of the model, in order to attempt to improve accuracy: 
+
+1. A larger amount of text data will be sampled (20000 lines each from blogs, news and Twitter feeds instead of the previous 5000 lines used in Tasks 3 and 4).
+2. The highest-order n-gram will be increased from 5-gram to 7-gram. 
+3. Two sets of n-grams will be generated: one containing stopwords, and one without. Each will be tested against a set of test data, as well as the phrases from Quiz 3. 
+4. The "Stupid Backoff" approach will be used. In this approach, the highest-order n-gram is first divided into the first n-1 words and the last word, which is the prediction, similar to the simple backoff. The score is calculated by taking the ratio of the frequency of the original n-gram divided by the frequency of the n-1-gram. If the n-gram is not found in the n-gram table, the model "backs off" to the n-1 gram. The procedure is performed recursively, each time multiplying the lower-order n-gram score by a coefficient (commonly set to 0.4). The prediction with the highest score is then selected.
+
+This model will be deployed in the Shiny app. The user will have an option to include or exclude stopwords.
+
+Some functions used in this step were used in previous tasks. In these cases, they will be sourced from text-predict-funcs.R. Please see the R markdown files for Tasks 3 and 4 for more detailed explanations of these steps.
+
+This report covers the *first* part of Task 5: generating the updated sets of n-grams. In the second part, the updated prediction model will be introduced.
+
+```{r source_fns}
+source("text-predict-funcs.R")
+```
+
+### Resampling the Text Data (Training and Testing) and Building the Corpora
+
+In this step, 20000 lines of data are sampled from each text source (blogs, news and Twitter feeds) to generate the training set, while 5000 lines from each source are sampled to generate the test set. 
+
+First, the full dataset is downloaded from [here](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip).
+
+```{r dl_time_lim, warning = FALSE, message = FALSE}
+options(timeout=500)
+```
+
+``` {r download_data, eval = TRUE}
+# define working directory
+wd <- "D:/Desktop/online-courses/Coursera/Data Science Specialization/Course 10 Data Science Capstone/course-project"
+
+# define URL where Capstone dataset will be downloaded
+url <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+
+# define name and destination of downloaded file 
+data.path <- paste(wd, "/SwiftKey-Data.zip", sep = "")
+
+# if the file containing the SwiftKey data does not yet exist, download the dataset
+if (!file.exists(data.path)){
+        download.file(url, data.path, mode = "wb")
+}
+```
+
+Then, the downloaded dataset is unzipped:
+
+``` {r unzip_file, eval = TRUE}
+# define path to unzipped file 
+data.files.path <- paste(wd, "/final", sep = "")
+
+# unzip file if necessary
+if(!file.exists(data.files.path)){
+        unzip(zipfile = data.files.path)
+}     
+```
+
+```{r, look_dirs_EN, eval = TRUE}
+# define path to English-language data
+data.files.path.EN <- paste(data.files.path, "/en_US", sep = "")
+```
+
+
+Next, the data are read into R: 
+
+```{r, read_full_datasets, cache = FALSE, warning = FALSE, eval = TRUE}
+# assign a variable name to each English dataset:
+blog.file <- paste(data.files.path.EN, "/en_US.blogs.txt", sep = "")  # blogs
+news.file <- paste(data.files.path.EN, "/en_US.news.txt", sep = "")  # news
+twitter.file <- paste(data.files.path.EN, "/en_US.twitter.txt", sep = "")  # Twitter
+
+# read in blog data
+blog.file.con <- file(blog.file, open = "r")
+blog.text <- readLines(blog.file.con, encoding = "UTF-8", skipNul = TRUE)
+close(blog.file.con)
+
+# read in news data
+news.file.con <- file(news.file, open = "r")
+news.text <- readLines(news.file.con, encoding = "UTF-8", skipNul = TRUE)
+close(news.file.con)
+
+# read in Twitter data
+twitter.file.con <- file(twitter.file, open = "r")
+twitter.text <- readLines(twitter.file.con, encoding = "UTF-8", skipNul = TRUE)
+close(twitter.file.con)
+```
+
+Then, the total amount of data for the training and test sets is sampled from each source:
+
+```{r sample_data, cache = FALSE, eval = TRUE}
+# set the seed to ensure reproducible results
+set.seed(59284)
+
+# set sample size
+sample.size <- 25000
+
+# sample data from each text file 
+sample.blog <- sample(blog.text, sample.size, replace = FALSE)
+sample.news <- sample(news.text, sample.size, replace = FALSE)
+sample.twitter <- sample(twitter.text, sample.size, replace = FALSE)
+```
+
+From each source, 5000 lines are designated as test data:
+
+```{r train_test_division}
+# generate training data from each source
+train.sample.blog <- sample.blog[1:20000]
+train.sample.news <- sample.news[1:20000]
+train.sample.twitter <- sample.twitter[1:20000]
+
+# generate test data from each source
+test.sample.blog <- sample.blog[20001:25000]
+test.sample.news <- sample.news[20001:25000]
+test.sample.twitter <- sample.twitter[20001:25000]
+```
+
+For the training and test data, the three sources are then combined into two data files and written to disk:
+
+```{r combine_samples, cache = FALSE, eval = TRUE}
+# training data
+# combine the data
+train.combined.sample <- c(train.sample.blog, train.sample.news, train.sample.twitter)
+
+# define filename for sample data
+train.combined.sample.filename <- "train_sample_data.txt"
+
+# write combined sample data to file 
+train.combined.sample.con <- file(train.combined.sample.filename, open = "w")
+writeLines(train.combined.sample, train.combined.sample.con)
+close(train.combined.sample.con)
+
+# test data
+# combine the data
+test.combined.sample <- c(test.sample.blog, test.sample.news, test.sample.twitter)
+
+# define filename for sample data
+test.combined.sample.filename <- "test_sample_data.txt"
+
+# write combined sample data to file 
+test.combined.sample.con <- file(test.combined.sample.filename, open = "w")
+writeLines(test.combined.sample, test.combined.sample.con)
+close(test.combined.sample.con)
+```
+
+The datasets are then unified into training and test corpora, using the r package "quanteda". This package was chosen due to its efficiency in processing large amounts of text data relative to other R packages. 
+
+```{r build_corpus, cache = FALSE, eval = TRUE}
+# build training corpus
+train.corpus <- corpus(train.combined.sample)
+
+# build test corpus 
+test.corpus <- corpus(test.combined.sample)
+```
+
+### Word Tokenization
+
+First, a list of profane words read in:
+
+```{r read_in_profanity}
+profanity <- read.profanity()
+```
+
+Next, the corpora are tokenized into words and the following data processing is performed:
+
+1. Website URLs, Twitter handles and email addresses are removed.
+2. Non-ASCII characters are removed.
+3. Numbers are removed.
+4. Punctuation is removed.
+5. Extra white space is removed.
+6. Profanity is removed.
+7. (optional) Stopwords are removed.
+
+Tokens are generated with and without stopwords for the training set:
+
+```{r gen_tokens}
+# tokens with stopwords
+train.tokens.with.stopwords <- generate.tokens(train.corpus, profanity, remove.stopwords = FALSE)
+
+# tokens without stopwords
+train.tokens.without.stopwords <- generate.tokens(train.corpus, profanity, remove.stopwords = TRUE)
+```
+
+### Generating N-Grams
+
+Using the training data containing stopwords, n-grams are generated from n = 1 to n = 7:
+
+```{r gen_ngrams_with_stopwords}
+# unigrams
+unigrams <- gen.ngrams(train.tokens.with.stopwords, 1)
+# bigrams
+bigrams <- gen.ngrams(train.tokens.with.stopwords, 2)
+# trigrams
+trigrams <- gen.ngrams(train.tokens.with.stopwords, 3)
+# 4-grams
+quadgrams <- gen.ngrams(train.tokens.with.stopwords, 4)
+# 5-grams
+quingrams <- gen.ngrams(train.tokens.with.stopwords, 5)
+# 6-grams
+sixgrams <- gen.ngrams(train.tokens.with.stopwords, 6)
+# 7-grams
+sevengrams <- gen.ngrams(train.tokens.with.stopwords, 7)
+```
+
+N-grams without stopwords are then generated (n = 1 to n = 7):
+
+```{r gen_ngrams_without_stopwords}
+# unigrams
+unigrams.nostop <- gen.ngrams(train.tokens.without.stopwords, 1)
+# bigrams
+bigrams.nostop <- gen.ngrams(train.tokens.without.stopwords, 2)
+# trigrams
+trigrams.nostop <- gen.ngrams(train.tokens.without.stopwords, 3)
+# 4-grams
+quadgrams.nostop <- gen.ngrams(train.tokens.without.stopwords, 4)
+# 5-grams
+quingrams.nostop <- gen.ngrams(train.tokens.without.stopwords, 5)
+# 6-grams
+sixgrams.nostop <- gen.ngrams(train.tokens.without.stopwords, 6)
+# 7-grams
+sevengrams.nostop <- gen.ngrams(train.tokens.without.stopwords, 7)
+```
+
+The n-gram frequency tables are then written to .csv files:
+
+```{r write_ngrams_to_file}
+# with stopwords
+
+# unigrams
+write.csv(unigrams, paste0(getwd(), "/1gram.csv"), row.names = FALSE)
+# bigrams
+write.csv(bigrams, paste0(getwd(), "/2gram.csv"), row.names = FALSE)
+# trigrams
+write.csv(trigrams, paste0(getwd(), "/3gram.csv"), row.names = FALSE)
+# 4-grams 
+write.csv(quadgrams, paste0(getwd(), "/4gram.csv"), row.names = FALSE)
+# 5-grams
+write.csv(quingrams, paste0(getwd(), "/5gram.csv"), row.names = FALSE)
+# 6-grams
+write.csv(sixgrams, paste0(getwd(), "/6gram.csv"), row.names = FALSE)
+# 7-grams
+write.csv(sevengrams, paste0(getwd(), "/7gram.csv"), row.names = FALSE)
+
+# without stopwords
+
+# unigrams
+write.csv(unigrams.nostop, paste0(getwd(), "/1gram_nostop.csv"), row.names = FALSE)
+# bigrams
+write.csv(bigrams.nostop, paste0(getwd(), "/2gram_nostop.csv"), row.names = FALSE)
+# trigrams
+write.csv(trigrams.nostop, paste0(getwd(), "/3gram_nostop.csv"), row.names = FALSE)
+# 4-grams 
+write.csv(quadgrams.nostop, paste0(getwd(), "/4gram_nostop.csv"), row.names = FALSE)
+# 5-grams
+write.csv(quingrams.nostop, paste0(getwd(), "/5gram_nostop.csv"), row.names = FALSE)
+# 6-grams
+write.csv(sixgrams.nostop, paste0(getwd(), "/6gram_nostop.csv"), row.names = FALSE)
+# 7-grams
+write.csv(sevengrams.nostop, paste0(getwd(), "/7gram_nostop.csv"), row.names = FALSE)
+```
