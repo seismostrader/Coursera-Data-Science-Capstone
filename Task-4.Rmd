@@ -221,6 +221,7 @@ text.matching <- function(input.text, ngrams.freq) {
 First, the most commonly-occurring unigram is identified:
 
 ```{r get_most_freq_unigram}
+# with stopwords
 most.freq.unigram <- def.most.freq.unigram(freq.1grams)
 ```
 

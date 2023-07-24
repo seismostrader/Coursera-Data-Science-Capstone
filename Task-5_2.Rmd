@@ -1,0 +1,386 @@
+---
+title: "Task 5 Part 2"
+author: "Anne Strader"
+date: "2023-07-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, echo = FALSE, warning = FALSE, message = FALSE}
+library(quanteda)
+library(quanteda.textstats)
+library(dplyr)
+library(stringi)
+```
+
+```{r source_functions}
+source("text-predict-funcs.R")
+```
+
+## Task 5: Creative Exploration 
+
+In Task 4 of the JHU Data Science Capstone project, "Prediction Model," a simple backoff text prediction model was generated from a combination of unigrams, bigrams, trigrams, 4-grams and 5-grams. Each n-gram with n > 2 was split into an n-1 gram, the model's "feature," and the final word, or "prediction." Stopwords were included to generate more natural speech patterns. Some cursory tests were performed, including through Quiz 2, showing that although the output of the model was fairly logical, its accuracy was lacking. One advantage of the model, however, was its quick performance due to a relatively small text data sample that was used to generate it. Therefore, it is possible to consider applying larger amounts of data to generate the predictive model, as well as introduce higher-order n-grams that may improve word prediction from longer phrases.
+
+The following changes are implemented in the next iteration of the model, in order to attempt to improve accuracy: 
+
+1. A larger amount of text data will be sampled (20000 lines each from blogs, news and Twitter feeds instead of the previous 5000 lines used in Tasks 3 and 4).
+2. The highest-order n-gram will be increased from 5-gram to 7-gram. 
+3. Two sets of n-grams will be generated: one containing stopwords, and one without. 
+4. The "Stupid Backoff" approach will be used. In this approach, the highest-order n-gram is first divided into the first n-1 words and the last word, which is the prediction, similar to the simple backoff. The score is calculated by taking the ratio of the frequency of the original n-gram divided by the frequency of the n-1-gram. If the n-gram is not found in the n-gram table, the model "backs off" to the n-1 gram. The procedure is performed recursively, each time multiplying the lower-order n-gram score by a coefficient (commonly set to 0.4) raised to the power of j-1 iterations. The prediction with the highest score is then selected.
+
+This model will be deployed in the Shiny app. The user will have an option to include or exclude stopwords and select the value of "alpha", or the stupid backoff coefficient.
+
+Some functions used in this step were used in previous tasks. In these cases, they will be sourced from text-predict-funcs.R. Please see the R markdown files for Tasks 3 and 4 for more detailed explanations of these steps.
+
+This report covers the *second* part of Task 5: introducing the stupid backoff algorithm and testing the prediction model. In the first part, the updated n-grams were generated.
+
+### Loading the N-Grams and Test Data
+
+First, the n-grams from the first part of Task 5 are loaded. There are two sets of n-grams, ranging in order from unigrams to 7-grams. One set contains stopwords; the other does not.
+
+```{r load_ngrams}
+# load n-grams with stopwords
+# unigrams
+freq.1grams.withstop <- read.csv(paste0(getwd(), "/1gram.csv"))
+# bigrams
+freq.2grams.withstop <- read.csv(paste0(getwd(), "/2gram.csv"))
+# trigrams
+freq.3grams.withstop <- read.csv(paste0(getwd(), "/3gram.csv"))
+# quadrigrams
+freq.4grams.withstop <- read.csv(paste0(getwd(), "/4gram.csv"))
+# 5-grams 
+freq.5grams.withstop <- read.csv(paste0(getwd(), "/5gram.csv"))
+# 6-grams
+freq.6grams.withstop <- read.csv(paste0(getwd(), "/6gram.csv"))
+# 7-grams
+freq.7grams.withstop <- read.csv(paste0(getwd(), "/7gram.csv"))
+
+# load n-grams without stopwords
+# unigrams
+freq.1grams.nostop <- read.csv(paste0(getwd(), "/1gram_nostop.csv"))
+# bigrams
+freq.2grams.nostop <- read.csv(paste0(getwd(), "/2gram_nostop.csv"))
+# trigrams
+freq.3grams.nostop <- read.csv(paste0(getwd(), "/3gram_nostop.csv"))
+# quadrigrams
+freq.4grams.nostop <- read.csv(paste0(getwd(), "/4gram_nostop.csv"))
+# 5-grams 
+freq.5grams.nostop <- read.csv(paste0(getwd(), "/5gram_nostop.csv"))
+# 6-grams
+freq.6grams.nostop <- read.csv(paste0(getwd(), "/6gram_nostop.csv"))
+# 7-grams
+freq.7grams.nostop <- read.csv(paste0(getwd(), "/7gram_nostop.csv"))
+```
+
+The test dataset is then loaded:
+
+```{r load_test_data}
+# define filename of test data file
+test.file <- paste(getwd(), "/test_sample_data.txt", sep = "")  
+
+# read in test data
+test.file.con <- file(test.file, open = "r")
+test.text <- readLines(test.file.con, encoding = "UTF-8", skipNul = TRUE)
+close(test.file.con)
+```
+
+### Stupid Backoff Algorithm
+
+As described in the introduction, the updated text prediction model is based on the stupid backoff algorithm. Here, a function implementing the stupid backoff algorithm is introduced:
+
+First, the coefficient "alpha" is defined:
+
+```{r define_alpha}
+alpha <- 0.4
+```
+
+As in the previous step, the most frequently-occurring unigram is defined:
+
+```{r define_highest_freq_unigram}
+# with stopwords
+highest.freq.unigram.withstop <- def.most.freq.unigram(freq.1grams.withstop)
+
+# without stopwords
+highest.freq.unigram.nostop <- def.most.freq.unigram(freq.1grams.nostop)
+```
+
+A list of profane words to be filtered out is read in:
+
+```{r read_in_profanity}
+profanity <- read.profanity()
+```
+
+Then, the stupid backoff algorithm is written as follows:
+
+```{r stupid_backoff_fn}
+stupid.backoff <- function(input.text, profanity, alpha, iteration = 0, remove.stopwords = FALSE, remove.lastword = FALSE) {
+    # INPUT:
+    # input.text = input text, where the next word will be predicted
+    # profanity = list of profane words to be filtered during input text processing 
+    # alpha = initial coefficient used to determine prediction scores
+    # iteration = iteration of the stupid backoff algorithm (used to calculate n-gram score coefficient)
+    # remove.stopwords = option to include stopwords or not (affects processing of input text and n-gram model usage)
+    # remove.lastword = whether to remove last word in input text
+    
+    # OUTPUT:
+    # predictions = dataframe containing two columns: next predicted words, scores
+    
+    # calculate coefficient to use in determining prediction scores
+    coeff <- alpha ^ iteration
+    
+    # process, trim and tokenize the input text
+    processed.input.text <- generate.tokens.from.input(input.text, profanity, highest.order.n = 7, 
+                                                       remove.stopwords = remove.stopwords, remove.lastword = remove.lastword)
+    
+    # count number of words in input text
+    num.tokens <- length(processed.input.text)
+    
+    # identify predicted word(s) and calculate their scores
+    # case where stopwords are removed
+    if (remove.stopwords == TRUE) {
+        
+        # check for matching 6-grams (first six words of 7-grams)
+        if (num.tokens == 6) {
+            predictions <- text.matching.sb(processed.input.text, freq.7grams.nostop, alpha)
+        }
+        
+        # check for matching 5-grams (first five words of 6-grams)
+        if (num.tokens == 5) {
+            predictions <- text.matching.sb(processed.input.text, freq.6grams.nostop, alpha)
+        }
+        
+        # check for matching 4-grams (first four words of 5-grams)
+        if (num.tokens == 4) {
+            predictions <- text.matching.sb(processed.input.text, freq.5grams.nostop, alpha)
+        }
+        
+        # check for matching trigrams (first three words of 4-grams)
+        if (num.tokens == 3) {
+            predictions <- text.matching.sb(processed.input.text, freq.4grams.nostop, alpha)
+        }
+        
+        # check for matching bigrams (first two words of 3-grams)
+        if (num.tokens == 2) {
+            predictions <- text.matching.sb(processed.input.text, freq.3grams.nostop, alpha)
+        }
+        
+        # check for matching unigrams (first word of bigrams)
+        if (num.tokens == 1) {
+            predictions <- text.matching.sb(processed.input.text, freq.2grams.nostop, alpha)
+        }
+        
+        # if there was no match:
+        # if length of input text was one, return the most common unigrams and their corresponding SB scores
+        # otherwise, remove first word from input text and repeat process with reduced coefficient
+        if (nrow(predictions) == 0) {
+            if (num.tokens == 1) {
+                predictions <- head(freq.1grams.nostop, 5)
+                predictions <- mutate(predictions, score = coeff * frequency / sum(frequency))
+                predictions <- head(predictions[, c("feature", "score")], 5)
+                colnames(predictions) <- c('prediction', 'score')
+            }
+            else {
+                processed.input.text <- processed.input.text[-1]
+                predictions <- stupid.backoff(processed.input.text, profanity, alpha, iteration = iteration + 1, remove.stopwords = TRUE)
+            }
+        } 
+    }
+    
+    # case where stopwords are left in
+    if (remove.stopwords == FALSE) {
+        
+        # check for matching 6-grams (first six words of 7-grams)
+        if (num.tokens == 6) {
+            predictions <- text.matching.sb(processed.input.text, freq.7grams.withstop, alpha)
+        }
+        
+        # check for matching 5-grams (first five words of 6-grams)
+        if (num.tokens == 5) {
+            predictions <- text.matching.sb(processed.input.text, freq.6grams.withstop, alpha)
+        }
+        
+        # check for matching 4-grams (first four words of 5-grams)
+        if (num.tokens == 4) {
+            predictions <- text.matching.sb(processed.input.text, freq.5grams.withstop, alpha)
+        }
+        
+        # check for matching trigrams (first three words of 4-grams)
+        if (num.tokens == 3) {
+            predictions <- text.matching.sb(processed.input.text, freq.4grams.withstop, alpha)
+        }
+        
+        # check for matching bigrams (first two words of 3-grams)
+        if (num.tokens == 2) {
+            predictions <- text.matching.sb(processed.input.text, freq.3grams.withstop, alpha)
+        }
+        
+        # check for matching unigrams (first word of bigrams)
+        if (num.tokens == 1) {
+            predictions <- text.matching.sb(processed.input.text, freq.2grams.withstop, alpha)
+        }
+        
+        # if there was no match:
+        # if length of input text was one, return the most common unigrams and their corresponding SB scores
+        # otherwise, remove first word from input text and repeat process with reduced coefficient
+        if (nrow(predictions) == 0) {
+            if (num.tokens == 1) {
+                predictions <- head(freq.1grams.withstop, 5)
+                predictions <- mutate(predictions, score = coeff * frequency / sum(frequency))
+                predictions <- head(predictions[, c("feature", "score")], 5)
+                colnames(predictions) <- c('prediction', 'score')
+            }
+            else {
+                processed.input.text <- processed.input.text[-1]
+                # print(processed.input.text)
+                predictions <- stupid.backoff(processed.input.text, profanity, alpha, iteration = iteration + 1, remove.stopwords = FALSE)
+            }
+        } 
+    }
+    
+    predictions
+}
+```
+
+Revised function to return stupid backoff scores as well as predicted words after text matching:
+
+```{r textmatching_stupid_backoff}
+text.matching.sb <- function(input.text, ngrams.freq, coeff) {
+    # INPUT:
+    # input.text = input text 
+    # ngrams.freq = set of n-grams
+    # coeff = stupid backoff coefficient, based on alpha and iteration number
+    
+    # OUTPUT:
+    # predicted.word = dataframe containing two columns: top five predicted words (left) and stupid backoff scores (right)
+    
+    # reduce dimensionality of input text to 1
+    input.text <- paste(input.text, collapse = " ")
+    
+    # check for match between feature and input text
+    predicted.word <- subset(ngrams.freq, match.text == input.text)
+    
+    # calculate stupid backoff scores for each predicted word
+    predicted.word <- mutate(predicted.word, score = coeff * frequency / sum(frequency))
+    
+    # return (at most) the top five predicted words
+    if (nrow(predicted.word > 5)) {
+        predicted.word <- head(predicted.word[, c("prediction", "score")], 5)
+    }
+    
+    predicted.word
+}
+```
+
+### Model Evaluations
+
+The introduction of the stupid backoff approach allowed the scores of multiple possible predictions to be easily compared. Combined with including stopwords for more natural speech patterns, Quiz 3 showed improved accuracy compared to the simple backoff model introduced in Task 4. Much like a text prediction algorithm on a smartphone, such as when using Gboard, the user will likely find it useful to select from multiple predictions, which the updated stupid backoff algorithm provides. 
+
+The final step of this task is to test the model (leaving in stopwords) on the test dataset containing stopwords. The five words with the highest frequencies are selected by the algorithm. An accurate prediction is defined here as the last word of a line (with length = n) of text matching one of the five predicted words, based on the first n-1 words.
+
+First, a function that returns the last token of the input text is introduced:
+
+```{r last_word_input_text}
+# return last token of input text
+get.last.word <- function(input.text, profanity, highest.order.n = 7, remove.stopwords = FALSE) {
+    # INPUT:
+    # input.text = text to be tokenized, processed and trimmed
+    # profanity = list of profane words to be filtered
+    # highest.order.n = maximum n - 1 tokens
+    # remove.stopwords = whether to remove stopwords
+    
+    # OUTPUT:
+    # last.word = last token in processed input text
+    
+    # tokenize input text, process and trim to maximum of 7 tokens
+    processed.input.text <- generate.tokens.from.input(input.text, profanity, highest.order.n = 7, 
+                                                       remove.stopwords = remove.stopwords, remove.lastword = FALSE)
+    
+    # get last token of processed input text
+    last.word = tail(processed.input.text, 1)
+    
+    last.word
+}
+
+```
+
+Then, a function to compare the last token of the input text to the predicted words is introduced:
+
+```{r match_test_text}
+# check if the last word of the test text is one of the top five predicted words
+match.test.text <- function(predictions, last.word) {
+    # INPUT:
+    # predictions = data frame including predicted next words from all but last word of test text
+    # last.word = last word of test text
+    
+    # OUTPUT:
+    # match.test = match result (1 = at least one match; 0 = no matches)
+    
+    # reduce dimensionality of input text to 1
+    last.word <- paste(last.word, collapse = " ")
+    
+    # check for match between prediction and last word of test text
+    predicted.word <- subset(predictions, prediction == last.word)
+    
+    # return binary result (at least one match = 1, no match = 0)
+    if (nrow(predicted.word) > 0) {
+        match.test <- 1
+    }
+    else {
+        match.test <- 0
+    }
+    
+    match.test
+} 
+```
+
+Then, the last word of each line of text in the test dataset is checked against the top five predictions from the stupid backoff model:
+
+```{r check_test_accuracy, eval = FALSE}
+# initialize number of matches
+num.matches <- 0
+
+# initialize number of lines in test dataset suitable for running prediction algorithm (> 1 word)
+num.test.lines <- 0
+
+# define total number of lines of test text 
+total.lines.text <- length(test.text)
+
+# check each line of text for match between top five predictions, last word of input text
+for (line in test.text[1:total.lines.text]) {
+    # check that line contains more than one word of text
+    num.words <- stri_stats_latex(line)
+    num.words <- num.words['Words']
+    
+    # if the line contains at least two words, run the prediction model
+    if (num.words > 1) {
+        test.tokens <- generate.tokens.from.input(line, profanity, highest.order.n = 7, remove.stopwords = FALSE, remove.lastword = TRUE)
+        
+        if (length(test.tokens) > 0) {
+        
+            # generate predictions
+            test.prediction <- stupid.backoff(line, profanity, alpha, iteration = 0, remove.stopwords = FALSE, remove.lastword = TRUE)
+
+            # get last word of line of text
+            last.word <- get.last.word(line, profanity, highest.order.n = 7, remove.stopwords = FALSE)
+
+            # check for match between predictions, last word
+            match.test <- match.test.text(test.prediction, last.word)
+    
+            # update total number of matches
+            num.matches <- num.matches + match.test
+
+            # update total number of test lines
+            num.test.lines <- num.test.lines + 1
+        }
+    }
+}
+
+# calculate accuracy
+accuracy <- num.matches / num.test.lines
+
+```
+
+The accuracy, or percentage of matches between the last word of each line and the top five predicted words, was quite low, at 14.9%. This was likely due to the inclusion of stopwords in the prediction model, many of which were usually included in the predictions. As the word predicted was often at the end of a sentence or a statement, it would be grammatically illogical for the predicted word to be a stopword. However, the primary purpose of a text prediction model is to help the user type a certain statement more efficiently. When writing a sentence, often stopwords will be used and should be predicted. Furthermore, a more sophisticated text prediction model would learn from common phrases and patterns the user would type, and refine its predictions over time. 
