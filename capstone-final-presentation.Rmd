@@ -1,0 +1,53 @@
+---
+title: "Text Prediction Using Stupid Backoff Algorithm"
+author: "Anne Strader"
+date: "2023-08-12"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Objective and Motivation
+
+The goal of the Coursera Data Science Capstone Project, in partnership with Swiftkey, is to develop an R Shiny app that can, given some input text, logically and reliably predict the next word.
+
+This project is an exercise in Natural Language Processing (NLP), or the application of computational techniques to analyze and generate text. 
+
+Text prediction is carried out using the *stupid backoff* algorithm (see "Large Language Models in Translation" by Thorsten Brants). The model compares the input text to a set of *n-grams*, starting with the highest-order n-grams and "backing off" to lower-order n-grams if a suitable match isn't found. The relative frequencies of predicted words are compared using the Stupid Backoff score (a higher score indicates higher frequency of occurrence). 
+
+## Technical Details
+
+To train the text prediction model, text data from the following sources were used:
+
+- news
+- blogs
+- Twitter feeds
+
+The stupid backoff algorithm was chosen due to the following factors:
+
+- computationally inexpensive, allowing for usage of large amounts of input data while also being easily deployable 
+- accuracy approaches that of Kneser-Ney smoothing, given large quantities of input data, but much more efficient
+
+## How to Use the App
+
+In the main panel, enter some input text and press the "Predict" button. (Profanity will automatically be filtered out.)
+
+The user can specify the following in the side panel:
+
+- whether or not to include stopwords (frequently-occurring words such as "a," "the," etc.)
+- the "alpha" value, which determines how much the stupid backoff score is penalized if the model backs down to a lower-order n-gram
+
+The app will display a list of (at maximum) five words that are most likely to follow the input text. The corresponding stupid backoff scores will be visualized in a horizontal barplot. 
+
+## Accuracy and Conclusions
+
+It is recommended to *use stopwords* when running this text prediction app. When including them, the accuracy approaches 80%, when considering if the next word in the test data set is a match for the top 7 predicted words (ranked by descending stupid backoff score). 
+
+However, for increased flexibility, the user is given the option to leave in or omit stopwords. 
+
+In a more sophisticated version of the app, the input text from the user could be stored, added to the training data and used to refine the frequency distributions of certain words, given the updated set of n-grams.
+
+Try the app [here](https://anne-strader.shinyapps.io/Coursera-Data-Science-Capstone/)! 
+

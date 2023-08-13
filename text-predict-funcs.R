@@ -11,6 +11,39 @@ library(quanteda.textstats)
 library(dplyr)
 library(stringi)
 
+# load input data
+# load n-grams with stopwords
+# unigrams
+freq.1grams.withstop <- read.csv(paste0(getwd(), "/1gram.csv"))
+# bigrams
+freq.2grams.withstop <- read.csv(paste0(getwd(), "/2gram.csv"))
+# trigrams
+freq.3grams.withstop <- read.csv(paste0(getwd(), "/3gram.csv"))
+# quadrigrams
+freq.4grams.withstop <- read.csv(paste0(getwd(), "/4gram.csv"))
+# 5-grams
+freq.5grams.withstop <- read.csv(paste0(getwd(), "/5gram.csv"))
+# 6-grams
+freq.6grams.withstop <- read.csv(paste0(getwd(), "/6gram.csv"))
+# 7-grams
+freq.7grams.withstop <- read.csv(paste0(getwd(), "/7gram.csv"))
+
+# load n-grams without stopwords
+# unigrams
+freq.1grams.nostop <- read.csv(paste0(getwd(), "/1gram_nostop.csv"))
+# bigrams
+freq.2grams.nostop <- read.csv(paste0(getwd(), "/2gram_nostop.csv"))
+# trigrams
+freq.3grams.nostop <- read.csv(paste0(getwd(), "/3gram_nostop.csv"))
+# quadrigrams
+freq.4grams.nostop <- read.csv(paste0(getwd(), "/4gram_nostop.csv"))
+# 5-grams
+freq.5grams.nostop <- read.csv(paste0(getwd(), "/5gram_nostop.csv"))
+# 6-grams
+freq.6grams.nostop <- read.csv(paste0(getwd(), "/6gram_nostop.csv"))
+# 7-grams
+freq.7grams.nostop <- read.csv(paste0(getwd(), "/7gram_nostop.csv"))
+
 # reads list of profane words for use in filtering profanity from corpus
 
 read.profanity <- function() {
@@ -290,11 +323,16 @@ stupid.backoff <- function(input.text, profanity, alpha, iteration = 0, remove.s
             predictions <- text.matching.sb(processed.input.text, freq.2grams.nostop, alpha)
         }
         
+        # length of input text was zero after filtering
+        else {
+            predictions <- data.frame()
+        }
+        
         # if there was no match:
         # if length of input text was one, return the most common unigrams and their corresponding SB scores
         # otherwise, remove first word from input text and repeat process with reduced coefficient
         if (nrow(predictions) == 0) {
-            if (num.tokens == 1) {
+            if (num.tokens == 1 | num.tokens == 0) {
                 predictions <- head(freq.1grams.nostop, 5)
                 predictions <- mutate(predictions, score = coeff * frequency / sum(frequency))
                 predictions <- head(predictions[, c("feature", "score")], 5)
@@ -340,11 +378,16 @@ stupid.backoff <- function(input.text, profanity, alpha, iteration = 0, remove.s
             predictions <- text.matching.sb(processed.input.text, freq.2grams.withstop, alpha)
         }
         
+        # length of input text was zero after filtering
+        else {
+            predictions <- data.frame()
+        }
+        
         # if there was no match:
         # if length of input text was one, return the most common unigrams and their corresponding SB scores
         # otherwise, remove first word from input text and repeat process with reduced coefficient
         if (nrow(predictions) == 0) {
-            if (num.tokens == 1) {
+            if (num.tokens == 1 | num.tokens == 0) {
                 predictions <- head(freq.1grams.withstop, 5)
                 predictions <- mutate(predictions, score = coeff * frequency / sum(frequency))
                 predictions <- head(predictions[, c("feature", "score")], 5)
